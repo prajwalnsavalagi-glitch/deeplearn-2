@@ -1,0 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-white text-gray-900 antialiased font-sans;
+  }
+}
+
+@layer utilities {
+  .bg-grid-pattern {
+    background-image: radial-gradient(circle, #e5e7eb 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}

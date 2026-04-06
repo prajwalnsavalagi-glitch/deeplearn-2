@@ -1,0 +1,139 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: users
+// Document ID: {uid}
+// Fields:
+//   - uid: string (required) - The unique identifier for the user.
+//   - email: string (required) - The user's email address.
+//   - name: string (required) - The user's full name.
+//   - photoURL: string (optional) - The user's profile picture URL.
+//   - createdAt: string (required) - The timestamp when the user was created.
+//
+// Collection: sessions
+// Document ID: {sessionId}
+// Fields:
+//   - title: string (required) - The title of the session.
+//   - description: string (optional) - A brief description of the session.
+//   - createdAt: string (required) - The timestamp when the session was created.
+//   - authorUID: string (required) - The UID of the user who created the session.
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user owns the resource (for user-owned documents)
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check if user is owner based on document's authorUID field
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorUID;
+    }
+
+    // Verify UID hasn't been tampered with on create (for users collection)
+    function uidUnchanged(uid) {
+      return request.resource.data.uid == uid && request.auth.uid == uid;
+    }
+
+    // Verify authorUID hasn't been tampered with on create (for sessions collection)
+    function authorUIDUnchanged() {
+      return request.resource.data.authorUID == request.auth.uid;
+    }
+
+    // Ensure uid field is not modified on update
+    function uidNotModified() {
+      return request.resource.data.uid == resource.data.uid;
+    }
+
+    // Ensure authorUID field is not modified on update
+    function authorUIDNotModified() {
+      return request.resource.data.authorUID == resource.data.authorUID;
+    }
+
+    // Validate required fields exist
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Validate string length
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    // Validate email format
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Validate ISO 8601 date string format (YYYY-MM-DDTHH:MM:SS)
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'name', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.createdAt is string && isValidDateString(data.createdAt) &&
+             (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() < 1000));
+    }
+
+    function isValidSession(data) {
+      return hasRequiredFields(['title', 'createdAt', 'authorUID']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.createdAt is string && isValidDateString(data.createdAt) &&
+             data.authorUID is string && data.authorUID.size() > 0 && data.authorUID.size() < 128 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 2000));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Users collection
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUser(request.resource.data) && uidUnchanged(uid);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data) && uidNotModified();
+      allow delete: if false; // Users cannot delete their own profile for now
+    }
+
+    // Sessions collection
+    match /sessions/{sessionId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidSession(request.resource.data) && authorUIDUnchanged();
+      allow update: if isDocOwner() && isValidSession(request.resource.data) && authorUIDNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
